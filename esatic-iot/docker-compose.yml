@@ -1,0 +1,37 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"   # MQTT
+      - "9001:9001"   # MQTT over WebSocket (dashboard)
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+
+  sensor:
+    build: ./sensor
+    # Remplacez VOTRE_USER_DOCKERHUB une fois l'image publiée (ou définissez-le dans un fichier .env)
+    image: ${DOCKERHUB_USER:-votre_user}/esatic-sensor:latest
+    container_name: sensor
+    restart: unless-stopped
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      SALLES: "salle1,salle2,salle3"
+      INTERVAL: "3"
+    depends_on:
+      - mosquitto
+
+  dashboard:
+    build: ./dashboard
+    container_name: dashboard
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - mosquitto
+
+volumes:
+  mosquitto_data:

@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESATIC – Station de mesure</title>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root {
+    --bg:#0b1220; --card:#16213a; --card2:#1c2a49; --line:#2a3a5e;
+    --text:#e8eefc; --muted:#8fa3c7;
+    --temp:#fb923c; --hum:#38bdf8;
+    --ok:#22c55e; --warn:#facc15; --alert:#ef4444; --accent:#6366f1;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); padding:16px; }
+  .wrap { max-width:1100px; margin:0 auto; display:flex; flex-direction:column; gap:16px; }
+
+  header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; }
+  .brand { display:flex; align-items:center; gap:12px; }
+  .logo { width:44px; height:44px; border-radius:12px; background:linear-gradient(135deg,var(--accent),#22d3ee); display:grid; place-items:center; font-weight:800; font-size:1.3rem; }
+  h1 { font-size:1.2rem; margin:0; }
+  .sub { color:var(--muted); font-size:.82rem; }
+  .right { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  #clock { color:var(--muted); font-variant-numeric:tabular-nums; font-size:.9rem; }
+  #status { font-size:.82rem; padding:5px 12px; border-radius:999px; background:#7f1d1d; }
+  #status.ok { background:#14532d; }
+
+  .alert { padding:12px 16px; border-radius:12px; font-weight:600; background:#7f1d1d; border:1px solid var(--alert); }
+  .alert.good { background:#10331f; border-color:#166534; color:#bbf7d0; font-weight:500; }
+  .alert.warnbox { background:#4a3b05; border-color:var(--warn); }
+
+  .rooms { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+  .room { text-align:left; font:inherit; color:inherit; background:var(--card); border:2px solid transparent; border-radius:14px; padding:14px; cursor:pointer; transition:border-color .15s, transform .15s; }
+  .room:hover { transform:translateY(-2px); }
+  .room.sel { border-color:var(--accent); background:var(--card2); }
+  .room-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+  .room-name { font-weight:700; }
+  .badge { font-size:.72rem; padding:3px 9px; border-radius:999px; font-weight:700; color:#06101f; }
+  .badge.ok { background:var(--ok); } .badge.warn { background:var(--warn); } .badge.alert { background:var(--alert); color:#fff; }
+  .room-vals { display:flex; gap:18px; font-size:1.25rem; font-weight:700; }
+  .rt { color:var(--temp); } .rh { color:var(--hum); }
+  .room-hint { color:var(--muted); font-size:.75rem; margin-top:6px; }
+
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
+  .card { background:var(--card); border-radius:14px; padding:16px; }
+  .card h2 { font-size:.9rem; margin:0 0 4px; color:var(--muted); font-weight:600; }
+  .big { font-size:2.8rem; font-weight:800; line-height:1.1; }
+  .big.t { color:var(--temp); } .big.h { color:var(--hum); }
+  .bar { height:10px; border-radius:999px; background:#0b1428; overflow:hidden; margin:10px 0 12px; }
+  .bar > div { height:100%; width:0; border-radius:999px; transition:width .5s, background .5s; }
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px; }
+  .stat { background:#0f1a31; border-radius:10px; padding:8px 10px; }
+  .stat span { display:block; color:var(--muted); font-size:.72rem; }
+  .stat b { font-size:1.05rem; font-variant-numeric:tabular-nums; }
+
+  .grid3 { display:grid; grid-template-columns:2fr 1fr; gap:16px; }
+  @media (max-width:760px) { .grid3 { grid-template-columns:1fr; } }
+  table { width:100%; border-collapse:collapse; font-size:.85rem; font-variant-numeric:tabular-nums; }
+  th { text-align:left; color:var(--muted); font-weight:600; font-size:.75rem; padding:6px 8px; border-bottom:1px solid var(--line); }
+  td { padding:7px 8px; border-bottom:1px solid #1f2d4d; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; }
+  .dot.ok { background:var(--ok); } .dot.warn { background:var(--warn); } .dot.alert { background:var(--alert); }
+  .info div { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #1f2d4d; font-size:.85rem; }
+  .info div:last-child { border-bottom:none; }
+  .info span { color:var(--muted); }
+  .info b { font-variant-numeric:tabular-nums; text-align:right; word-break:break-all; }
+  .legend { color:var(--muted); font-size:.75rem; margin-top:10px; }
+  footer { color:var(--muted); font-size:.78rem; text-align:center; padding:4px 0 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <div class="logo">E</div>
+      <div>
+        <h1>ESATIC · Station de mesure</h1>
+        <div class="sub">Température et humidité des locaux, en temps réel</div>
+      </div>
+    </div>
+    <div class="right">
+      <span id="clock">--:--:--</span>
+      <span id="status">Déconnecté</span>
+    </div>
+  </header>
+
+  <div id="alert" class="alert warnbox">En attente des premières mesures…</div>
+
+  <section class="rooms" id="rooms"></section>
+
+  <section class="grid2">
+    <div class="card">
+      <h2>🌡️ Température · <span class="selname">–</span></h2>
+      <div class="big t" id="tVal">--</div>
+      <div class="bar"><div id="tBar"></div></div>
+      <div class="stats">
+        <div class="stat"><span>Min</span><b id="tMin">–</b></div>
+        <div class="stat"><span>Moyenne</span><b id="tAvg">–</b></div>
+        <div class="stat"><span>Max</span><b id="tMax">–</b></div>
+      </div>
+      <canvas id="chartTemp" height="150"></canvas>
+    </div>
+    <div class="card">
+      <h2>💧 Humidité · <span class="selname">–</span></h2>
+      <div class="big h" id="hVal">--</div>
+      <div class="bar"><div id="hBar"></div></div>
+      <div class="stats">
+        <div class="stat"><span>Min</span><b id="hMin">–</b></div>
+        <div class="stat"><span>Moyenne</span><b id="hAvg">–</b></div>
+        <div class="stat"><span>Max</span><b id="hMax">–</b></div>
+      </div>
+      <canvas id="chartHum" height="150"></canvas>
+    </div>
+  </section>
+
+  <section class="grid3">
+    <div class="card">
+      <h2>Dernières mesures (toutes salles)</h2>
+      <table>
+        <thead><tr><th>Heure</th><th>Salle</th><th>Température</th><th>Humidité</th><th>État</th></tr></thead>
+        <tbody id="log"></tbody>
+      </table>
+      <div class="legend">Seuils : Attention ≥ 30 °C ou ≥ 70 % · Alerte ≥ 32 °C ou ≥ 75 % · la ligne rouge des courbes marque le seuil d'alerte.</div>
+    </div>
+    <div class="card info">
+      <h2>Informations système</h2>
+      <div><span>Messages reçus</span><b id="iCount">0</b></div>
+      <div><span>Salles actives</span><b id="iRooms">0</b></div>
+      <div><span>Dernier message</span><b id="iAge">–</b></div>
+      <div><span>Topic MQTT</span><b>esatic/+/mesures</b></div>
+      <div><span>Broker</span><b id="iBroker">–</b></div>
+      <div><span>Protocole</span><b>MQTT / WebSocket</b></div>
+    </div>
+  </section>
+
+  <footer>ESATIC · Mini-projet IoT · Capteur → Broker MQTT (AWS) → Tableau de bord</footer>
+</div>
+
+<script>
+  // Le broker tourne sur la même machine que cette page (port WebSocket 9001).
+  const BROKER_URL = `ws://${location.hostname}:9001`;
+  const TOPIC = "esatic/+/mesures";
+  const MAX_POINTS = 40;
+  const T_WARN = 30, T_ALERT = 32, H_WARN = 70, H_ALERT = 75;
+  const COLORS = { ok:"#22c55e", warn:"#facc15", alert:"#ef4444" };
+  const LEVEL_TXT = { ok:"Normal", warn:"Attention", alert:"Alerte" };
+
+  const rooms = {};
+  let selected = null, totalMsgs = 0, lastMsgAt = null, connected = false;
+  const log = [];
+
+  const $ = id => document.getElementById(id);
+  const prettyName = s => s.replace(/^salle(\d+)$/i, "Salle $1");
+  const fmt = (v, u) => (isFinite(v) ? v.toFixed(1) + " " + u : "–");
+
+  function level(m) {
+    if (m.temperature >= T_ALERT || m.humidite >= H_ALERT) return "alert";
+    if (m.temperature >= T_WARN || m.humidite >= H_WARN) return "warn";
+    return "ok";
+  }
+  function levelT(v) { return v >= T_ALERT ? "alert" : v >= T_WARN ? "warn" : "ok"; }
+  function levelH(v) { return v >= H_ALERT ? "alert" : v >= H_WARN ? "warn" : "ok"; }
+
+  $("iBroker").textContent = location.hostname + ":9001";
+
+  // ---------- Graphiques ----------
+  function makeChart(id, color, unit, seuil) {
+    return new Chart($(id), {
+      type: "line",
+      data: { labels: [], datasets: [
+        { data: [], borderColor: color, backgroundColor: color + "33", fill: true, tension: .3, pointRadius: 0, borderWidth: 2 },
+        { data: [], borderColor: "#ef4444", borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5, fill: false }
+      ]},
+      options: {
+        animation: false,
+        plugins: { legend: { display: false }, tooltip: { filter: i => i.datasetIndex === 0 } },
+        scales: {
+          x: { ticks: { color: "#8fa3c7", maxTicksLimit: 5 }, grid: { color: "#22315a" } },
+          y: { ticks: { color: "#8fa3c7", callback: v => v + unit }, grid: { color: "#22315a" } }
+        }
+      }
+    });
+  }
+  const chartTemp = makeChart("chartTemp", "#fb923c", "°C");
+  const chartHum = makeChart("chartHum", "#38bdf8", "%");
+
+  // ---------- Salles ----------
+  function ensureRoom(name) {
+    if (rooms[name]) return rooms[name];
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "room";
+    el.innerHTML = '<div class="room-head"><span class="room-name"></span><span class="badge"></span></div>' +
+      '<div class="room-vals"><span class="rt"></span><span class="rh"></span></div>' +
+      '<div class="room-hint">Cliquer pour afficher les courbes</div>';
+    el.querySelector(".room-name").textContent = prettyName(name);
+    el.addEventListener("click", () => select(name));
+    $("rooms").appendChild(el);
+    rooms[name] = { el, labels: [], t: [], h: [], n: 0,
+      tmin: Infinity, tmax: -Infinity, tsum: 0, hmin: Infinity, hmax: -Infinity, hsum: 0, last: null };
+    if (!selected) select(name);
+    return rooms[name];
+  }
+
+  function select(name) {
+    selected = name;
+    for (const [k, r] of Object.entries(rooms)) r.el.classList.toggle("sel", k === name);
+    document.querySelectorAll(".selname").forEach(e => e.textContent = prettyName(name));
+    renderSelected();
+  }
+
+  function updateCard(r) {
+    const m = r.last, lv = level(m);
+    const b = r.el.querySelector(".badge");
+    b.textContent = LEVEL_TXT[lv];
+    b.className = "badge " + lv;
+    r.el.querySelector(".rt").textContent = m.temperature.toFixed(1) + " °C";
+    r.el.querySelector(".rh").textContent = m.humidite.toFixed(1) + " %";
+  }
+
+  function renderSelected() {
+    const r = rooms[selected];
+    if (!r || !r.last) return;
+    const m = r.last;
+    $("tVal").textContent = m.temperature.toFixed(1) + " °C";
+    $("hVal").textContent = m.humidite.toFixed(1) + " %";
+    const tp = Math.max(0, Math.min(100, (m.temperature - 15) / 25 * 100));
+    $("tBar").style.width = tp + "%";
+    $("tBar").style.background = COLORS[levelT(m.temperature)];
+    $("hBar").style.width = Math.max(0, Math.min(100, m.humidite)) + "%";
+    $("hBar").style.background = COLORS[levelH(m.humidite)];
+    $("tMin").textContent = fmt(r.tmin, "°C");
+    $("tMax").textContent = fmt(r.tmax, "°C");
+    $("tAvg").textContent = fmt(r.tsum / r.n, "°C");
+    $("hMin").textContent = fmt(r.hmin, "%");
+    $("hMax").textContent = fmt(r.hmax, "%");
+    $("hAvg").textContent = fmt(r.hsum / r.n, "%");
+
+    chartTemp.data.labels = r.labels;
+    chartTemp.data.datasets[0].data = r.t;
+    chartTemp.data.datasets[1].data = r.labels.map(() => T_ALERT);
+    chartTemp.update();
+    chartHum.data.labels = r.labels;
+    chartHum.data.datasets[0].data = r.h;
+    chartHum.data.datasets[1].data = r.labels.map(() => H_ALERT);
+    chartHum.update();
+  }
+
+  // ---------- Alertes, journal, infos ----------
+  function renderAlert() {
+    const box = $("alert");
+    const bad = [], warn = [];
+    for (const [k, r] of Object.entries(rooms)) {
+      if (!r.last) continue;
+      const lv = level(r.last);
+      const txt = prettyName(k) + " (" + r.last.temperature.toFixed(1) + " °C, " + r.last.humidite.toFixed(1) + " %)";
+      if (lv === "alert") bad.push(txt); else if (lv === "warn") warn.push(txt);
+    }
+    if (bad.length) {
+      box.className = "alert";
+      box.textContent = "⚠️ ALERTE : " + bad.join(" · ");
+    } else if (warn.length) {
+      box.className = "alert warnbox";
+      box.textContent = "⚠️ Attention : " + warn.join(" · ");
+    } else {
+      box.className = "alert good";
+      box.textContent = "✅ Toutes les salles sont dans les valeurs normales.";
+    }
+  }
+
+  function td(text) { const e = document.createElement("td"); e.textContent = text; return e; }
+  function renderLog() {
+    const body = $("log");
+    body.replaceChildren();
+    for (const e of log) {
+      const tr = document.createElement("tr");
+      tr.appendChild(td(e.time));
+      tr.appendChild(td(prettyName(e.salle)));
+      tr.appendChild(td(e.temperature.toFixed(1) + " °C"));
+      tr.appendChild(td(e.humidite.toFixed(1) + " %"));
+      const st = document.createElement("td");
+      const dot = document.createElement("span");
+      dot.className = "dot " + e.lv;
+      st.appendChild(dot);
+      st.appendChild(document.createTextNode(LEVEL_TXT[e.lv]));
+      tr.appendChild(st);
+      body.appendChild(tr);
+    }
+  }
+
+  function renderInfo() {
+    $("iCount").textContent = totalMsgs;
+    $("iRooms").textContent = Object.keys(rooms).length;
+    $("iAge").textContent = lastMsgAt ? Math.round((Date.now() - lastMsgAt) / 1000) + " s" : "–";
+  }
+
+  setInterval(() => {
+    $("clock").textContent = new Date().toLocaleTimeString("fr-FR");
+    renderInfo();
+  }, 1000);
+
+  // ---------- MQTT ----------
+  const statusEl = $("status");
+  const client = mqtt.connect(BROKER_URL, { reconnectPeriod: 3000 });
+
+  client.on("connect", () => {
+    connected = true;
+    statusEl.textContent = "Connecté au broker";
+    statusEl.classList.add("ok");
+    client.subscribe(TOPIC);
+  });
+  client.on("close", () => {
+    connected = false;
+    statusEl.textContent = "Déconnecté";
+    statusEl.classList.remove("ok");
+  });
+
+  client.on("message", (topic, message) => {
+    let m;
+    try { m = JSON.parse(message.toString()); } catch { return; }
+    if (typeof m.temperature !== "number" || typeof m.humidite !== "number" || !m.salle) return;
+
+    const r = ensureRoom(m.salle);
+    const label = new Date(m.timestamp).toLocaleTimeString("fr-FR");
+    r.last = m;
+    r.n++;
+    r.tmin = Math.min(r.tmin, m.temperature); r.tmax = Math.max(r.tmax, m.temperature); r.tsum += m.temperature;
+    r.hmin = Math.min(r.hmin, m.humidite);    r.hmax = Math.max(r.hmax, m.humidite);    r.hsum += m.humidite;
+    r.labels.push(label); r.t.push(m.temperature); r.h.push(m.humidite);
+    if (r.labels.length > MAX_POINTS) { r.labels.shift(); r.t.shift(); r.h.shift(); }
+
+    log.unshift({ time: label, salle: m.salle, temperature: m.temperature, humidite: m.humidite, lv: level(m) });
+    if (log.length > 10) log.pop();
+    totalMsgs++;
+    lastMsgAt = Date.now();
+
+    updateCard(r);
+    if (m.salle === selected) renderSelected();
+    renderAlert();
+    renderLog();
+    renderInfo();
+  });
+</script>
+</body>
+</html>
