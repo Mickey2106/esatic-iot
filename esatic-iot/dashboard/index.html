@@ -153,7 +153,8 @@
   const log = [];
 
   const $ = id => document.getElementById(id);
-  const prettyName = s => s.replace(/^salle(\d+)$/i, "Salle $1");
+  const NAMES = { csia3: "CSIA 3", srit3b: "SRIT 3B", twin3: "TWIN 3" };
+  const prettyName = s => NAMES[s.toLowerCase()] || s;
   const fmt = (v, u) => (isFinite(v) ? v.toFixed(1) + " " + u : "–");
 
   function level(m) {
