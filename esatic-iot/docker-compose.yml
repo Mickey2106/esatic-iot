@@ -19,7 +19,7 @@ services:
     environment:
       MQTT_HOST: mosquitto
       MQTT_PORT: "1883"
-      SALLES: "salle1,salle2,salle3"
+      SALLES: "csia3,srit3b,twin3"
       INTERVAL: "3"
     depends_on:
       - mosquitto
